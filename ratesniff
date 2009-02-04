@@ -1,0 +1,172 @@
+#!/usr/bin/perl
+#####
+#
+# Show bandwidth used for specified flows
+# (c) 2009 - JayKim <klathor.at.gmail.dot.com>
+#
+#####
+
+=pod
+
+=head1 NAME
+
+ratesniff - Show bandwidth used for specified flows
+
+=head1 SYNOPSIS
+
+ ratesniff [-i <dev>] [-n <interval>] [-t] [-d] "name1=regex1" "name2=regex2"...
+
+ Options
+    -h            Print usage and quit
+    -m            Print full manpage and quit
+    -i <dev>      The device to pass to tcpdump, defaults to eth0
+    -n <interval> The seconds between rate dumps, defaults to 10
+    -t            Print a timestamp at the end of each line
+    -d            Print debug info, for testing regexes
+
+=head1 DESCRIPTION
+
+This program will take a series of named regexes and periodically print out the
+bandwidth used for all matching flows. Regexes are applied to the output of 
+C<'tcpdump -nnql -p tcp'>.
+
+=cut
+
+use warnings; 
+use strict;
+
+use Pod::Usage;
+use Getopt::Std;
+use FileHandle;
+use POSIX qw(strftime);
+
+my $TCPDUMP = '/usr/sbin/tcpdump -nnql -p tcp';
+
+# Parse opts
+my %OPTS;
+$OPTS{i} = 'eth0';
+$OPTS{n} = 10;
+getopts('hmi:n:td', \%OPTS) or pod2usage;
+$OPTS{h} and pod2usage(1);
+$OPTS{m} and pod2usage(-verbose => 2);
+@ARGV or
+    pod2usage("No regexes given.\n");
+grep(!/=/, @ARGV) and
+    pod2usage("Invalid argument.\n");
+
+# Parse args
+my %flows = map({/(.*?)=(.*)/ and $1 => qr/$2/} @ARGV);
+my $num_flows = @ARGV;
+
+# Call tcpdump
+my $dumpout = new FileHandle "$TCPDUMP -i $OPTS{i}|" or
+    die("Unable to run tcpdump");
+
+# Set formats
+my @headers = sort(keys(%flows));
+my @fields;
+my $time = '';
+if ($OPTS{t}) {
+    $time = "  @|||||||||||||||";
+    push(@headers, "Time");
+}
+my $format = "format STDOUT_TOP =\n".
+    '@>>>>>>>>>... ' x $num_flows . "$time\n".
+    "\@headers\n".
+    ".\n";
+eval $format;
+$format = "format STDOUT =\n".
+    '@####.## @>>> ' x $num_flows . "$time\n".
+    "\@fields\n".
+    ".\n";
+eval $format;
+
+# Initialize counters
+my %size;
+# Fancy way to set all sizes to 0... I was bored...
+@size{keys(%flows)} = unpack("C*", "\000" x $num_flows);
+my $last = time;
+
+# Read from tcpdump forever!
+print "Reading from tcpdump...\n";
+while (chomp(my $input = $dumpout->getline())) { 
+    print STDERR "Got: '$input'\n" if $OPTS{d};
+
+    # Match each filter, multiple filters could match
+    for my $flow (keys(%flows)) {
+        $input =~ /$flows{$flow}/ or next;
+        print STDERR "Matched: $flow\n" if $OPTS{d};
+        my ($bytes) = $input =~ /\stcp\s(\d+)/o or next;
+        $size{$flow} += $bytes;
+    }
+
+    # Skip the rest unless we reach the interval
+    my $now = time;
+    next if $now-$last < $OPTS{n};
+
+    # Make up some rates
+    @fields = ();
+    for (sort(keys(%flows))) {
+        my $rate = $size{$_}*8/(1024*($now-$last));
+        my $unit = "kbps"; 
+        if ($rate > 1000) {
+            $rate /= 1024; 
+            $unit ="mpbs"
+        } 
+        push(@fields, $rate, $unit);
+    }
+    push(@fields, strftime("%b %e %T", localtime)) if $OPTS{t};
+    write;
+
+    # Reset counters
+    @size{keys(%flows)} = unpack("C*", "\000" x $num_flows);
+    $last = $now;
+}
+
+exit;
+
+=pod
+
+=head1 OPTIONS
+
+=over
+
+=item B<-h>
+
+Print a brief help message and exit.
+
+=item B<-m>
+
+Print the full manpage and exit.
+
+=item B<< -i <dev> >>
+
+Pass the specified device to F<tcpdump>. Defaults to C<eth0>.
+
+=item B<< -n <interval> >>
+
+Wait <interval> seconds between rate dumps, defaults to 10 seconds.
+
+=item B<-t>
+
+Print a timestamp at the end of each line.
+
+=item B<-d>
+
+Turns on debugging output for testing regexes. All debug messages are piped to 
+STDERR.
+
+=back
+
+=head1 REGEXES
+
+All other arguments are assumed to be named regexes. Regex format is:
+
+<name>=<regex>
+
+That is: a short name, followed by an equal sign, followed by a perl regular
+expression. The regex can be anything perl considers valid. Turn on debugging
+mode to see the output of F<tcpdump> for examples of what to match. B<Make sure
+the entire arg is quoted if necessary.>
+
+=cut
