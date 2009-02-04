@@ -14,21 +14,24 @@ ratesniff - Show bandwidth used for specified flows
 
 =head1 SYNOPSIS
 
- ratesniff [-i <dev>] [-n <interval>] [-t] [-d] "name1=regex1" "name2=regex2"...
+ ratesniff [options] "name1=regex1" "name2=regex2"...
 
  Options
-    -h            Print usage and quit
-    -m            Print full manpage and quit
-    -i <dev>      The device to pass to tcpdump, defaults to eth0
-    -n <interval> The seconds between rate dumps, defaults to 10
-    -t            Print a timestamp at the end of each line
-    -d            Print debug info, for testing regexes
+    -h              Print usage and quit
+    -m              Print full manpage and quit
+    -i <dev>        The device to pass to tcpdump, defaults to eth0
+    -n <interval>   The seconds between rate dumps, defaults to 10
+    -t              Print a timestamp at the end of each line
+    -d              Print debug info, for testing regexes
+    -C <command>    Override the F<tcpdump> command
+    -A <args>       Override the options passed to tcpdump
+    -E <expression> Matching expression passed to tcpdump
 
 =head1 DESCRIPTION
 
 This program will take a series of named regexes and periodically print out the
 bandwidth used for all matching flows. Regexes are applied to the output of 
-C<'tcpdump -nnql -p tcp'>.
+C<'tcpdump -nnql -i eth0'> by default.
 
 =cut
 
@@ -40,13 +43,21 @@ use Getopt::Std;
 use FileHandle;
 use POSIX qw(strftime);
 
-my $TCPDUMP = '/usr/sbin/tcpdump -nnql -p tcp';
+# Matching regexes for different protocols
+my %PROTOS = (tcp  => qr/\stcp\s(\d+)/,
+              udp  => qr/\sUDP,\slength\s(\d+)/,
+              icmp => qr/\sICMP\s.*\slength\s(\d+)/);
+
+# Defaults
+my %OPTS;
+$OPTS{i} = 'eth0';      # Interface
+$OPTS{n} = 10;          # Interval
+$OPTS{C} = 'tcpdump';   # tcpdump command
+$OPTS{A} = '-nnql';     # tcpdump args
+$OPTS{E} = '';          # tcpdump filter expression
 
 # Parse opts
-my %OPTS;
-$OPTS{i} = 'eth0';
-$OPTS{n} = 10;
-getopts('hmi:n:td', \%OPTS) or pod2usage;
+getopts('hmi:n:tdC:A:E:', \%OPTS) or pod2usage;
 $OPTS{h} and pod2usage(1);
 $OPTS{m} and pod2usage(-verbose => 2);
 @ARGV or
@@ -59,7 +70,7 @@ my %flows = map({/(.*?)=(.*)/ and $1 => qr/$2/} @ARGV);
 my $num_flows = @ARGV;
 
 # Call tcpdump
-my $dumpout = new FileHandle "$TCPDUMP -i $OPTS{i}|" or
+my $dumpout = new FileHandle "$OPTS{C} $OPTS{A} -i $OPTS{i} $OPTS{E}|" or
     die("Unable to run tcpdump");
 
 # Set formats
@@ -95,9 +106,17 @@ while (chomp(my $input = $dumpout->getline())) {
     # Match each filter, multiple filters could match
     for my $flow (keys(%flows)) {
         $input =~ /$flows{$flow}/ or next;
-        print STDERR "Matched: $flow\n" if $OPTS{d};
-        my ($bytes) = $input =~ /\stcp\s(\d+)/o or next;
-        $size{$flow} += $bytes;
+        print STDERR "Matched: $flow" if $OPTS{d};
+
+        my $bytes;
+        for my $proto (keys(%PROTOS)) {
+            if (($bytes) = $input =~ /$PROTOS{$proto}/) {
+                print STDERR ", proto $proto, len $bytes" if $OPTS{d};
+                last;
+            }
+        }
+        print STDERR "\n" if $OPTS{d};
+        $size{$flow} += $bytes if $bytes;
     }
 
     # Skip the rest unless we reach the interval
@@ -154,7 +173,22 @@ Print a timestamp at the end of each line.
 =item B<-d>
 
 Turns on debugging output for testing regexes. All debug messages are piped to 
-STDERR.
+STDERR. Get ready for lots of output.
+
+=item B<< -C <command> >>
+
+Override the F<tcpdump> command. Defaults to 'tcpdump'. Maybe you want to 
+specify a full path? Go nuts.
+
+=item B<< -A <args> >>
+
+Override the options passed to tcpdump. Defaults to '-nnql'. I would not touch
+these unless you know what you are doing.
+
+=item B< -E <expression> >>
+
+Matching expression passed to tcpdump. Empty by default. If you have lots of
+traffic you do not care about you may want to try filtering it with this.
 
 =back
 
@@ -168,5 +202,18 @@ That is: a short name, followed by an equal sign, followed by a perl regular
 expression. The regex can be anything perl considers valid. Turn on debugging
 mode to see the output of F<tcpdump> for examples of what to match. B<Make sure
 the entire arg is quoted if necessary.>
+
+=head1 BUGS AND DISCLAIMERS
+
+If tcpdump reports packets 'dropped by kernel', you cannot count them with this
+script either. 
+
+This script only counts the user data bytes as reported by tcpdump. Packet
+headers are not counted, nor are protocols other than tcp/udp/icmp (for now).
+
+Even if packets are not dropped there are no guarantees that the output of this 
+script is even close to accurate. Do not believe the output. Do not use the 
+output for anything important. Above all, do not blame me if you ignore what 
+I just said.
 
 =cut
