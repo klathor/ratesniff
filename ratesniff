@@ -19,6 +19,7 @@ ratesniff - Show bandwidth used for specified flows
  Options
     -h              Print usage and quit
     -m              Print full manpage and quit
+    -V              Print version and quit
     -i <dev>        The device to pass to tcpdump, defaults to eth0
     -n <interval>   The seconds between rate dumps, defaults to 10
     -t              Print a timestamp at the end of each line
@@ -43,6 +44,8 @@ use Getopt::Std;
 use FileHandle;
 use POSIX qw(strftime);
 
+use constant VERSION => '0.0.1';
+
 # Matching regexes for different protocols
 my %PROTOS = (tcp  => qr/\stcp\s(\d+)/,
               udp  => qr/\sUDP,\slength\s(\d+)/,
@@ -57,9 +60,11 @@ $OPTS{A} = '-nnql';     # tcpdump args
 $OPTS{E} = '';          # tcpdump filter expression
 
 # Parse opts
-getopts('hmi:n:tdC:A:E:', \%OPTS) or pod2usage;
+getopts('hmVi:n:tdC:A:E:', \%OPTS) or pod2usage;
 $OPTS{h} and pod2usage(1);
 $OPTS{m} and pod2usage(-verbose => 2);
+$OPTS{V} and 
+	print "ratesniff v", VERSION, "\n" and exit;
 @ARGV or
     pod2usage("No regexes given.\n");
 grep(!/=/, @ARGV) and
@@ -157,6 +162,10 @@ Print a brief help message and exit.
 =item B<-m>
 
 Print the full manpage and exit.
+
+=item B<-V>
+
+Print version and exit.
 
 =item B<< -i <dev> >>
 
