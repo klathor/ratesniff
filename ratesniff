@@ -24,9 +24,10 @@ ratesniff - Show bandwidth used for specified flows
     -n <interval>   The seconds between rate dumps, defaults to 10
     -t              Print a timestamp at the end of each line
     -d              Print debug info, for testing regexes
-    -C <command>    Override the F<tcpdump> command
+    -C <command>    Override the tcpdump command
     -A <args>       Override the options passed to tcpdump
     -E <expression> Matching expression passed to tcpdump
+    -b              Disable output buffering
 
 =head1 DESCRIPTION
 
@@ -60,7 +61,7 @@ $OPTS{A} = '-nnql';     # tcpdump args
 $OPTS{E} = '';          # tcpdump filter expression
 
 # Parse opts
-getopts('hmVi:n:tdC:A:E:', \%OPTS) or pod2usage;
+getopts('hmVi:n:tdC:A:E:b', \%OPTS) or pod2usage;
 $OPTS{h} and pod2usage(1);
 $OPTS{m} and pod2usage(-verbose => 2);
 $OPTS{V} and 
@@ -69,6 +70,7 @@ $OPTS{V} and
     pod2usage("No regexes given.\n");
 grep(!/=/, @ARGV) and
     pod2usage("Invalid argument.\n");
+$OPTS{b} and $| = 1;
 
 # Parse args
 my %flows = map({/(.*?)=(.*)/ and $1 => qr/$2/} @ARGV);
@@ -194,10 +196,15 @@ specify a full path? Go nuts.
 Override the options passed to tcpdump. Defaults to '-nnql'. I would not touch
 these unless you know what you are doing.
 
-=item B< -E <expression> >>
+=item B<< -E <expression> >>
 
 Matching expression passed to tcpdump. Empty by default. If you have lots of
 traffic you do not care about you may want to try filtering it with this.
+
+=item B<-b>
+
+Disable output buffering. Useful for getting realtime updates when redirecting 
+output.
 
 =back
 
