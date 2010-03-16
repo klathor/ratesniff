@@ -45,7 +45,7 @@ use Getopt::Std;
 use FileHandle;
 use POSIX qw(strftime);
 
-use constant VERSION => '0.0.1';
+use constant VERSION => '0.0.2';
 
 # Matching regexes for different protocols
 my %PROTOS = (tcp  => qr/\stcp\s(\d+)/,
